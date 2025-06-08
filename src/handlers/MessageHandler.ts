@@ -12,8 +12,8 @@ import { promisify } from "util";
 const execAsync = promisify(exec);
 
 export interface AudioStatus {
-  app: string;
-  percentage: number;
+  name: string;
+  volume: number;
 }
 
 export interface MessageHandlerContext {
@@ -81,15 +81,15 @@ function mapLineToAudioStatus(line: string): AudioStatus | null {
   }
 
   const processName = extractProcessNameFromPath(processPath);
-  const percentage = parseFloat(volumePercent);
+  const volume = parseFloat(volumePercent);
 
-  if (!processName || isNaN(percentage)) {
+  if (!processName || isNaN(volume)) {
     return null;
   }
 
   return {
-    app: processName,
-    percentage: percentage,
+    name: processName,
+    volume,
   };
 }
 
