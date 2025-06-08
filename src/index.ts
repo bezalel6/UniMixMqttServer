@@ -17,8 +17,8 @@ async function main(): Promise<void> {
       password: process.env.MQTT_PASSWORD,
       serverName: "UniMixMqttServer",
       subscribedTopics: [
-        "unimix/audio/requests", // Audio status requests
-        "unimix/audio/control", // Audio mix updates
+        "homeassistant/unimix/audio/requests", // Audio status requests
+        "homeassistant/unimix/audio/control", // Audio mix updates
       ],
     });
 

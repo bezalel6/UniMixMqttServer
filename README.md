@@ -65,19 +65,19 @@ The client publishes data to the following MQTT topics:
 
 ### System Status
 
-- **Topic**: `unimix/system/status`
+- **Topic**: `homeassistant/unimix/system/status`
 - **Data**: System status, uptime, and memory usage
 - **Interval**: Every 10 seconds (configurable)
 
 ### Sensor Data
 
-- **Topic**: `unimix/sensors/environment`
+- **Topic**: `homeassistant/unimix/sensors/environment`
 - **Data**: Temperature, humidity, and pressure readings
 - **Interval**: Every 10 seconds (configurable)
 
 ### Device Metrics
 
-- **Topic**: `unimix/device/metrics`
+- **Topic**: `homeassistant/unimix/device/metrics`
 - **Data**: CPU usage, network RX/TX statistics
 - **Interval**: Every 10 seconds (configurable)
 

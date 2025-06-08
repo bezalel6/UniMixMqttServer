@@ -66,7 +66,12 @@ function parseAudioProcessOutput(rawOutput: string): string {
     .map(mapLineToAudioStatus)
     .filter((status): status is AudioStatus => status !== null);
 
-  return audioStatuses.map((status) => JSON.stringify(status)).join("\n");
+  const audioStatusObject: Record<string, number> = {};
+  audioStatuses.forEach((status) => {
+    audioStatusObject[status.name] = status.volume;
+  });
+
+  return JSON.stringify(audioStatusObject, null, 2);
 }
 
 /**
@@ -122,7 +127,10 @@ export class AudioStatusRequestHandler extends BaseMessageHandler<AudioStatusReq
     try {
       const audioStatuses = await getAudio();
       // Publish the result to the general audio status topic
-      await context.mqttClient.publish("unimix/audio_status", audioStatuses);
+      await context.mqttClient.publish(
+        "homeassistant/unimix/audio_status",
+        audioStatuses
+      );
     } catch (error) {
       logger.error(`Failed to get audio status:`, error);
     }

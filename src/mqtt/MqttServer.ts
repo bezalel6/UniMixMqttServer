@@ -16,7 +16,10 @@ export class MqttServer {
 
   constructor(config: MqttServerConfig) {
     this.config = {
-      subscribedTopics: ["unimix/+/messages", "unimix/commands/+"],
+      subscribedTopics: [
+        "homeassistant/unimix/+/messages",
+        "homeassistant/unimix/commands/+",
+      ],
       serverName: "UniMixMqttServer",
       ...config,
     };
@@ -131,7 +134,7 @@ export class MqttServer {
       };
 
       await this.mqttClient.publish(
-        "unimix/server/status",
+        "homeassistant/unimix/server/status",
         JSON.stringify(statusMessage)
       );
     } catch (error) {
