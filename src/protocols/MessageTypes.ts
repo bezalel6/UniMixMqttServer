@@ -10,7 +10,6 @@ export interface BaseMessage {
   messageType: MessageType;
   timestamp: string;
   messageId: string;
-  clientId: string;
 }
 
 // Audio message schemas
@@ -20,10 +19,20 @@ export interface AudioStatusRequestMessage extends BaseMessage {
 
 export interface AudioMixUpdateMessage extends BaseMessage {
   messageType: MessageType.AUDIO_MIX_UPDATE;
-  processName: string;
-  volumePercent: number;
-  action?: "set_volume" | "mute" | "unmute";
+  updates: AudioMixUpdate[];
 }
+export type AudioMixUpdate = { processName: string } & (
+  | {
+      action: "SetVolume";
+      volume: number;
+    }
+  | {
+      action: "Mute";
+    }
+  | {
+      action: "Unmute";
+    }
+);
 
 // Union type for all messages
 export type UniMixMessage = AudioStatusRequestMessage | AudioMixUpdateMessage;

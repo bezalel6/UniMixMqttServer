@@ -4,6 +4,7 @@ import {
   MessageType,
   AudioStatusRequestMessage,
   AudioMixUpdateMessage,
+  AudioMixUpdate,
 } from "../protocols/MessageTypes";
 import { logger } from "../utils/logger";
 import { exec } from "child_process";
@@ -116,7 +117,7 @@ export class AudioStatusRequestHandler extends BaseMessageHandler<AudioStatusReq
     message: AudioStatusRequestMessage,
     context: MessageHandlerContext
   ): Promise<void> {
-    logger.info(`[AUDIO_STATUS_REQUEST] Received from ${message.clientId}`);
+    logger.info(`[AUDIO_STATUS_REQUEST] Received from ${context.clientId}`);
 
     try {
       const audioStatuses = await getAudio();
@@ -133,23 +134,35 @@ export class AudioMixUpdateHandler extends BaseMessageHandler<AudioMixUpdateMess
     message: AudioMixUpdateMessage,
     context: MessageHandlerContext
   ): Promise<void> {
-    logger.info(`[AUDIO_MIX_UPDATE] Received from ${message.clientId}:`, {
-      processName: message.processName,
-      volumePercent: message.volumePercent,
-      action: message.action,
-    });
+    logger.info(
+      `[AUDIO_MIX_UPDATE] Received from ${context.clientId} with ${message.updates.length} updates`
+    );
 
     try {
-      // Here you would implement the actual audio mixing update logic
-      // This might involve using svcl.exe to set the volume for the specific process
-      logger.info(
-        `Setting ${message.processName} volume to ${message.volumePercent}%`
-      );
+      // Generate all commands and concatenate them
+      const commands = message.updates.map((update) => updateToCmd(update));
+      const concatenatedCmd = commands.map((cmd) => `/${cmd}`).join(" ");
 
-      // TODO: Implement actual volume setting command
-      // Example: ./svcl.exe /SetVolume "chrome.exe" 0.75
+      logger.info(`Executing concatenated commands: ${concatenatedCmd}`);
+
+      // Execute all commands in a single svcl.exe call
+      await execAsync(`& "./svcl.exe" ${concatenatedCmd}`, {
+        shell: "powershell",
+      });
+
+      logger.info(`Successfully executed ${commands.length} commands`);
     } catch (error) {
       logger.error(`Failed to update audio mix:`, error);
     }
+  }
+}
+function updateToCmd(update: AudioMixUpdate): string {
+  switch (update.action) {
+    case "SetVolume":
+      return `${update.action} "${update.processName}" ${update.volume}`;
+    case "Mute":
+      return `${update.action} "${update.processName}"`;
+    case "Unmute":
+      return `${update.action} "${update.processName}"`;
   }
 }
