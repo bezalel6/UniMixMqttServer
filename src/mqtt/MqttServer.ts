@@ -109,7 +109,7 @@ export class MqttServer {
       };
 
       // Route the message to appropriate handler
-      await this.messageRouter.routeMessage(messageString, topic, context);
+      await this.messageRouter.routeMessage(messageString, topic);
     } catch (error) {
       logger.error(`Error handling message on topic ${topic}:`, error);
     }
@@ -172,6 +172,13 @@ export class MqttServer {
    */
   getMessageRouter(): MessageRouter {
     return this.messageRouter;
+  }
+
+  /**
+   * Get the MQTT client instance
+   */
+  getMqttClient(): MqttClient {
+    return this.mqttClient;
   }
 
   /**

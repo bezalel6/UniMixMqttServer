@@ -1,19 +1,14 @@
 import {
   MessageType,
   UniMixMessage,
-  HeartbeatMessage,
-  StatusRequestMessage,
-  DeviceCommandMessage,
-  DeviceStatusMessage,
-  DeviceConfigMessage,
-  SensorDataMessage,
-  TelemetryMessage,
-  UserRequestMessage,
-  ShutdownMessage,
+  AudioStatusRequestMessage,
+  AudioMixUpdateMessage,
+  AudioMixUpdate,
 } from "../protocols/MessageTypes";
+import { AUDIO_ACTIONS } from "../protocols/MessageConstants";
 
 /**
- * Utility class to build valid messages according to defined protocols
+ * Utility class to build valid audio messages according to defined protocols
  */
 export class MessageBuilder {
   /**
@@ -31,229 +26,130 @@ export class MessageBuilder {
   }
 
   /**
-   * Build a heartbeat message
+   * Build an audio status request message
    */
-  static buildHeartbeat(clientId: string, uptime: number): HeartbeatMessage {
+  static buildAudioStatusRequest(): AudioStatusRequestMessage {
     return {
-      messageType: MessageType.HEARTBEAT,
+      messageType: MessageType.AUDIO_STATUS_REQUEST,
       timestamp: this.getTimestamp(),
       messageId: this.generateMessageId(),
-      clientId,
-      uptime,
     };
   }
 
   /**
-   * Build a status request message
+   * Build an audio mix update message
    */
-  static buildStatusRequest(
-    clientId: string,
-    requestedComponents?: string[]
-  ): StatusRequestMessage {
+  static buildAudioMixUpdate(updates: AudioMixUpdate[]): AudioMixUpdateMessage {
     return {
-      messageType: MessageType.STATUS_REQUEST,
+      messageType: MessageType.AUDIO_MIX_UPDATE,
       timestamp: this.getTimestamp(),
       messageId: this.generateMessageId(),
-      clientId,
-      requestedComponents,
+      updates,
     };
   }
 
   /**
-   * Build a device command message
+   * Build a volume control update
    */
-  static buildDeviceCommand(
-    clientId: string,
-    deviceId: string,
-    command: string,
-    parameters?: Record<string, any>
-  ): DeviceCommandMessage {
+  static buildVolumeUpdate(
+    processName: string,
+    volume: number
+  ): AudioMixUpdate {
     return {
-      messageType: MessageType.DEVICE_COMMAND,
-      timestamp: this.getTimestamp(),
-      messageId: this.generateMessageId(),
-      clientId,
-      deviceId,
-      command,
-      parameters,
+      processName,
+      action: AUDIO_ACTIONS.SET_VOLUME,
+      volume,
     };
   }
 
   /**
-   * Build a device status message
+   * Build a mute update
    */
-  static buildDeviceStatus(
-    clientId: string,
-    deviceId: string,
-    status: "active" | "inactive" | "error" | "unknown",
-    data?: Record<string, any>
-  ): DeviceStatusMessage {
+  static buildMuteUpdate(processName: string): AudioMixUpdate {
     return {
-      messageType: MessageType.DEVICE_STATUS,
-      timestamp: this.getTimestamp(),
-      messageId: this.generateMessageId(),
-      clientId,
-      deviceId,
-      status,
-      data,
+      processName,
+      action: AUDIO_ACTIONS.MUTE,
     };
   }
 
   /**
-   * Build a device configuration message
+   * Build an unmute update
    */
-  static buildDeviceConfig(
-    clientId: string,
-    deviceId: string,
-    configuration: Record<string, any>
-  ): DeviceConfigMessage {
+  static buildUnmuteUpdate(processName: string): AudioMixUpdate {
     return {
-      messageType: MessageType.DEVICE_CONFIG,
-      timestamp: this.getTimestamp(),
-      messageId: this.generateMessageId(),
-      clientId,
-      deviceId,
-      configuration,
+      processName,
+      action: AUDIO_ACTIONS.UNMUTE,
     };
   }
 
   /**
-   * Build a sensor data message
+   * Helper to create a single volume control message
    */
-  static buildSensorData(
-    clientId: string,
-    sensorId: string,
-    sensorType: string,
-    value: number | string | boolean,
-    unit?: string,
-    metadata?: Record<string, any>
-  ): SensorDataMessage {
-    return {
-      messageType: MessageType.SENSOR_DATA,
-      timestamp: this.getTimestamp(),
-      messageId: this.generateMessageId(),
-      clientId,
-      sensorId,
-      sensorType,
-      value,
-      unit,
-      metadata,
-    };
+  static buildSingleVolumeControl(
+    processName: string,
+    volume: number
+  ): AudioMixUpdateMessage {
+    const update = this.buildVolumeUpdate(processName, volume);
+    return this.buildAudioMixUpdate([update]);
   }
 
   /**
-   * Build a telemetry message
+   * Helper to create a single mute control message
    */
-  static buildTelemetry(
-    clientId: string,
-    source: string,
-    data: Record<string, any>
-  ): TelemetryMessage {
-    return {
-      messageType: MessageType.TELEMETRY,
-      timestamp: this.getTimestamp(),
-      messageId: this.generateMessageId(),
-      clientId,
-      source,
-      data,
-    };
+  static buildSingleMuteControl(processName: string): AudioMixUpdateMessage {
+    const update = this.buildMuteUpdate(processName);
+    return this.buildAudioMixUpdate([update]);
   }
 
   /**
-   * Build a user request message
+   * Helper to create a single unmute control message
    */
-  static buildUserRequest(
-    clientId: string,
-    userId: string,
-    action: string,
-    payload?: Record<string, any>
-  ): UserRequestMessage {
-    return {
-      messageType: MessageType.USER_REQUEST,
-      timestamp: this.getTimestamp(),
-      messageId: this.generateMessageId(),
-      clientId,
-      userId,
-      action,
-      payload,
-    };
+  static buildSingleUnmuteControl(processName: string): AudioMixUpdateMessage {
+    const update = this.buildUnmuteUpdate(processName);
+    return this.buildAudioMixUpdate([update]);
   }
 
   /**
-   * Build a shutdown message
-   */
-  static buildShutdown(
-    clientId: string,
-    reason?: string,
-    gracefulTimeout?: number
-  ): ShutdownMessage {
-    return {
-      messageType: MessageType.SHUTDOWN,
-      timestamp: this.getTimestamp(),
-      messageId: this.generateMessageId(),
-      clientId,
-      reason,
-      gracefulTimeout,
-    };
-  }
-
-  /**
-   * Convert any message to JSON string
+   * Convert message to JSON string
    */
   static toJson(message: UniMixMessage): string {
     return JSON.stringify(message, null, 2);
   }
 
   /**
-   * Convert any message to compact JSON string (for MQTT transmission)
+   * Convert message to compact JSON string
    */
   static toCompactJson(message: UniMixMessage): string {
     return JSON.stringify(message);
   }
 
   /**
-   * Build a batch of sensor data messages
+   * Build batch volume updates for multiple processes
    */
-  static buildSensorDataBatch(
-    clientId: string,
-    sensors: Array<{
-      sensorId: string;
-      sensorType: string;
-      value: number | string | boolean;
-      unit?: string;
-      metadata?: Record<string, any>;
-    }>
-  ): SensorDataMessage[] {
-    return sensors.map((sensor) =>
-      this.buildSensorData(
-        clientId,
-        sensor.sensorId,
-        sensor.sensorType,
-        sensor.value,
-        sensor.unit,
-        sensor.metadata
-      )
+  static buildBatchVolumeUpdates(
+    processes: Array<{ processName: string; volume: number }>
+  ): AudioMixUpdateMessage {
+    const updates = processes.map((p) =>
+      this.buildVolumeUpdate(p.processName, p.volume)
     );
+    return this.buildAudioMixUpdate(updates);
   }
 
   /**
-   * Build a batch of device commands
+   * Build batch mute updates for multiple processes
    */
-  static buildDeviceCommandBatch(
-    clientId: string,
-    commands: Array<{
-      deviceId: string;
-      command: string;
-      parameters?: Record<string, any>;
-    }>
-  ): DeviceCommandMessage[] {
-    return commands.map((cmd) =>
-      this.buildDeviceCommand(
-        clientId,
-        cmd.deviceId,
-        cmd.command,
-        cmd.parameters
-      )
-    );
+  static buildBatchMuteUpdates(processNames: string[]): AudioMixUpdateMessage {
+    const updates = processNames.map((name) => this.buildMuteUpdate(name));
+    return this.buildAudioMixUpdate(updates);
+  }
+
+  /**
+   * Build batch unmute updates for multiple processes
+   */
+  static buildBatchUnmuteUpdates(
+    processNames: string[]
+  ): AudioMixUpdateMessage {
+    const updates = processNames.map((name) => this.buildUnmuteUpdate(name));
+    return this.buildAudioMixUpdate(updates);
   }
 }

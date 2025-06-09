@@ -1,14 +1,14 @@
-import { MessageType, UniMixMessage } from "./MessageTypes";
+import { MessageType, MessageTypeValue, UniMixMessage } from "./MessageTypes";
 import {
   BaseMessageHandler,
-  MessageHandlerContext,
   AudioStatusRequestHandler,
   AudioMixUpdateHandler,
 } from "../handlers/MessageHandler";
+import { MessageContext } from "./IMessagePublisher";
 import { logger } from "../utils/logger";
 
 export class MessageRouter {
-  private handlers: Map<MessageType, BaseMessageHandler<any>>;
+  private handlers: Map<MessageTypeValue, BaseMessageHandler<any>>;
 
   constructor() {
     this.handlers = new Map();
@@ -30,11 +30,7 @@ export class MessageRouter {
   /**
    * Route a message to the appropriate handler
    */
-  async routeMessage(
-    messagePayload: string,
-    topic: string,
-    context: MessageHandlerContext
-  ): Promise<void> {
+  async routeMessage(messagePayload: string, topic: string): Promise<void> {
     try {
       // Parse the JSON message
       const message = JSON.parse(messagePayload);
@@ -54,6 +50,15 @@ export class MessageRouter {
         return;
       }
 
+      // Create transport-agnostic context
+      const context: MessageContext = {
+        originalTopic: topic,
+        messageId:
+          message.messageId ||
+          `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        timestamp: new Date(),
+      };
+
       // Route to handler
       logger.debug(`Routing ${message.messageType} message to handler`);
       await handler.handle(message, context);
@@ -66,7 +71,7 @@ export class MessageRouter {
    * Register a custom handler for a message type
    */
   registerHandler<T extends UniMixMessage>(
-    messageType: MessageType,
+    messageType: MessageTypeValue,
     handler: BaseMessageHandler<T>
   ): void {
     logger.info(`Registering custom handler for message type: ${messageType}`);
@@ -76,14 +81,14 @@ export class MessageRouter {
   /**
    * Get all supported message types
    */
-  getSupportedMessageTypes(): MessageType[] {
+  getSupportedMessageTypes(): MessageTypeValue[] {
     return Array.from(this.handlers.keys());
   }
 
   /**
    * Check if a message type is supported
    */
-  isMessageTypeSupported(messageType: MessageType): boolean {
+  isMessageTypeSupported(messageType: MessageTypeValue): boolean {
     return this.handlers.has(messageType);
   }
 }

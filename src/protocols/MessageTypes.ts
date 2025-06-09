@@ -1,36 +1,40 @@
 // Message type definitions for UniMix MQTT Server
-export enum MessageType {
+import { MESSAGE_TYPES, AUDIO_ACTIONS } from "./MessageConstants";
+
+export const MessageType = {
   // Audio control messages
-  AUDIO_STATUS_REQUEST = "audio.status.request",
-  AUDIO_MIX_UPDATE = "audio.mix.update",
-}
+  AUDIO_STATUS_REQUEST: MESSAGE_TYPES.AUDIO_STATUS_REQUEST,
+  AUDIO_MIX_UPDATE: MESSAGE_TYPES.AUDIO_MIX_UPDATE,
+} as const;
+
+export type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];
 
 // Base message interface
 export interface BaseMessage {
-  messageType: MessageType;
+  messageType: MessageTypeValue;
   timestamp: string;
   messageId: string;
 }
 
 // Audio message schemas
 export interface AudioStatusRequestMessage extends BaseMessage {
-  messageType: MessageType.AUDIO_STATUS_REQUEST;
+  messageType: typeof MessageType.AUDIO_STATUS_REQUEST;
 }
 
 export interface AudioMixUpdateMessage extends BaseMessage {
-  messageType: MessageType.AUDIO_MIX_UPDATE;
+  messageType: typeof MessageType.AUDIO_MIX_UPDATE;
   updates: AudioMixUpdate[];
 }
 export type AudioMixUpdate = { processName: string } & (
   | {
-      action: "SetVolume";
+      action: typeof AUDIO_ACTIONS.SET_VOLUME;
       volume: number;
     }
   | {
-      action: "Mute";
+      action: typeof AUDIO_ACTIONS.MUTE;
     }
   | {
-      action: "Unmute";
+      action: typeof AUDIO_ACTIONS.UNMUTE;
     }
 );
 

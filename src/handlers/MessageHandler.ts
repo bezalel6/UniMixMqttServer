@@ -1,4 +1,3 @@
-import { MqttClient } from "../mqtt/MqttClient";
 import {
   UniMixMessage,
   MessageType,
@@ -6,6 +5,10 @@ import {
   AudioMixUpdateMessage,
   AudioMixUpdate,
 } from "../protocols/MessageTypes";
+import {
+  MessageContext,
+  MessagePublisher,
+} from "../protocols/IMessagePublisher";
 import { logger } from "../utils/logger";
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -17,14 +20,100 @@ export interface AudioStatus {
   volume: number;
 }
 
-export interface MessageHandlerContext {
-  mqttClient: MqttClient;
-  clientId: string;
-  originalTopic: string;
+class StatusPublisher {
+  private static instance: StatusPublisher | null = null;
+  private intervalId: NodeJS.Timeout | null = null;
+  private messagePublisher: MessagePublisher;
+  private statusTopic: string = "homeassistant/unimix/audio_status";
+
+  private constructor() {
+    this.messagePublisher = MessagePublisher.getInstance();
+  }
+
+  static getInstance(): StatusPublisher {
+    if (!StatusPublisher.instance) {
+      StatusPublisher.instance = new StatusPublisher();
+    }
+    return StatusPublisher.instance;
+  }
+
+  setStatusTopic(topic: string): void {
+    this.statusTopic = topic;
+  }
+
+  async startPublishing(intervalMs: number = 60000): Promise<void> {
+    if (!this.messagePublisher.isInitialized()) {
+      throw new Error(
+        "Message publisher not initialized. Call MessagePublisher.setPublisher first."
+      );
+    }
+
+    // Publish initial status
+    await this.publishStatus();
+
+    // Set up periodic publishing
+    this.startPeriodicPublishing(intervalMs);
+
+    logger.info(
+      `StatusPublisher started with initial publish and periodic publishing every ${intervalMs}ms`
+    );
+  }
+
+  private startPeriodicPublishing(intervalMs: number): void {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+    }
+
+    this.intervalId = setInterval(() => {
+      this.publishStatus();
+    }, intervalMs);
+  }
+
+  async publishStatus(): Promise<void> {
+    if (!this.messagePublisher.isInitialized()) {
+      logger.warn("Message publisher not available for status publishing");
+      return;
+    }
+
+    try {
+      const audioStatuses = await getAudio();
+      await this.messagePublisher.publish(this.statusTopic, audioStatuses);
+      logger.info("Audio status published successfully");
+    } catch (error) {
+      logger.error("Failed to publish audio status:", error);
+    }
+  }
+
+  stop(): void {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+    logger.info("StatusPublisher stopped");
+  }
 }
 
 export abstract class BaseMessageHandler<T extends UniMixMessage> {
-  abstract handle(message: T, context: MessageHandlerContext): Promise<void>;
+  private static statusPublisher = StatusPublisher.getInstance();
+  protected messagePublisher = MessagePublisher.getInstance();
+
+  static async initializeStatusPublisher(
+    statusTopic: string,
+    intervalMs: number
+  ): Promise<void> {
+    BaseMessageHandler.statusPublisher.setStatusTopic(statusTopic);
+    await BaseMessageHandler.statusPublisher.startPublishing(intervalMs);
+  }
+
+  static async publishStatus(): Promise<void> {
+    await BaseMessageHandler.statusPublisher.publishStatus();
+  }
+
+  static stopStatusPublisher(): void {
+    BaseMessageHandler.statusPublisher.stop();
+  }
+
+  abstract handle(message: T, context: MessageContext): Promise<void>;
 
   protected generateMessageId(): string {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -32,24 +121,30 @@ export abstract class BaseMessageHandler<T extends UniMixMessage> {
 
   protected async sendResponse(
     message: UniMixMessage,
-    responseTopic: string,
-    context: MessageHandlerContext
+    responseTopic: string
   ): Promise<void> {
-    await context.mqttClient.publish(responseTopic, JSON.stringify(message));
+    await this.messagePublisher.publish(responseTopic, JSON.stringify(message));
   }
 }
-const RelevantProcesses = [/JellyfinMediaPlayer/i, /youtube/i, /chrome/i];
+
+const RelevantProcesses = [
+  /JellyfinMediaPlayer/i,
+  /youtube/i,
+  /chrome/i,
+  /cod/i,
+  /DefaultRenderDevice/i,
+];
+
 async function getAudio() {
   // Execute the PowerShell command to get audio status
   const { stdout, stderr } = await execAsync(
-    `& "./svcl.exe" /Stdout /scomma '""' /Columns 'ProcessPath,Volume Percent' | Select-String '[^\\/]+\\.exe[^\\/]*'`,
+    `& "./svcl.exe" /Stdout /scomma '""' /Columns 'ProcessPath,Volume Percent' /GetPercent "DefaultRenderDevice"`,
     { shell: "powershell" }
   );
 
   if (stderr) {
     logger.error(`PowerShell stderr: ${stderr}`);
   }
-
   const audioStatuses = parseAudioProcessOutput(stdout);
   logger.info(`Audio status output:\n${audioStatuses}`);
   return audioStatuses;
@@ -72,7 +167,7 @@ function parseAudioProcessOutput(rawOutput: string): string {
     audioStatusObject[status.name] = status.volume;
   });
 
-  return JSON.stringify(audioStatusObject, null, 2);
+  return JSON.stringify(audioStatusObject);
 }
 
 /**
@@ -93,6 +188,9 @@ function mapLineToAudioStatus(line: string): AudioStatus | null {
   const [processPath, volumePercent] = line.split(",").map((s) => s.trim());
 
   if (!processPath || !volumePercent) {
+    if (processPath.includes(".")) {
+      return { name: "DefaultRenderDevice", volume: Number(line) };
+    }
     return null;
   }
 
@@ -103,7 +201,6 @@ function mapLineToAudioStatus(line: string): AudioStatus | null {
     return null;
   }
 
-  console.log(processName);
   return {
     name: processName,
     volume,
@@ -126,24 +223,28 @@ function extractProcessNameFromPath(line: string): string {
   return trimmedLine.substring(lastBackslashIndex + 1).trim();
 }
 
-getAudio();
-
 export class AudioStatusRequestHandler extends BaseMessageHandler<AudioStatusRequestMessage> {
   async handle(
     message: AudioStatusRequestMessage,
-    context: MessageHandlerContext
+    context: MessageContext
   ): Promise<void> {
-    logger.info(`[AUDIO_STATUS_REQUEST] Received from ${context.clientId}`);
+    logger.info(`Handling audio status request: ${message.messageId}`);
 
     try {
       const audioStatuses = await getAudio();
-      // Publish the result to the general audio status topic
-      await context.mqttClient.publish(
-        "homeassistant/unimix/audio_status",
+
+      // Publish status directly to the status topic
+      await this.messagePublisher.publish(
+        process.env.AUDIO_STATUS_TOPIC || "homeassistant/unimix/audio_status",
         audioStatuses
       );
+
+      logger.info(`Audio status published for request: ${message.messageId}`);
     } catch (error) {
-      logger.error(`Failed to get audio status:`, error);
+      logger.error(
+        `Failed to handle audio status request: ${message.messageId}`,
+        error
+      );
     }
   }
 }
@@ -151,37 +252,43 @@ export class AudioStatusRequestHandler extends BaseMessageHandler<AudioStatusReq
 export class AudioMixUpdateHandler extends BaseMessageHandler<AudioMixUpdateMessage> {
   async handle(
     message: AudioMixUpdateMessage,
-    context: MessageHandlerContext
+    context: MessageContext
   ): Promise<void> {
-    logger.info(
-      `[AUDIO_MIX_UPDATE] Received from ${context.clientId} with ${message.updates.length} updates`
-    );
+    logger.info(`Handling audio mix update: ${message.messageId}`);
 
     try {
-      // Generate all commands and concatenate them
-      const commands = message.updates.map((update) => updateToCmd(update));
-      const concatenatedCmd = commands.map((cmd) => `/${cmd}`).join(" ");
+      for (const update of message.updates) {
+        const command = updateToCmd(update);
+        logger.info(`Executing command: ${command}`);
 
-      logger.info(`Executing concatenated commands: ${concatenatedCmd}`);
+        const { stdout, stderr } = await execAsync(command, {
+          shell: "powershell",
+        });
 
-      // Execute all commands in a single svcl.exe call
-      await execAsync(`& "./svcl.exe" ${concatenatedCmd}`, {
-        shell: "powershell",
-      });
+        if (stderr) {
+          logger.error(`Command stderr: ${stderr}`);
+        } else {
+          logger.info(`Command executed successfully: ${stdout}`);
+        }
+      }
 
-      logger.info(`Successfully executed ${commands.length} commands`);
+      logger.info(`Audio mix update completed: ${message.messageId}`);
     } catch (error) {
-      logger.error(`Failed to update audio mix:`, error);
+      logger.error(
+        `Failed to handle audio mix update: ${message.messageId}`,
+        error
+      );
     }
   }
 }
+
 function updateToCmd(update: AudioMixUpdate): string {
   switch (update.action) {
     case "SetVolume":
-      return `${update.action} "${update.processName}" ${update.volume}`;
+      return `& "./svcl.exe" /SetVolume "${update.processName}" ${update.volume}`;
     case "Mute":
-      return `${update.action} "${update.processName}"`;
+      return `& "./svcl.exe" /Mute "${update.processName}"`;
     case "Unmute":
-      return `${update.action} "${update.processName}"`;
+      return `& "./svcl.exe" /Unmute "${update.processName}"`;
   }
 }
