@@ -62,6 +62,12 @@ export interface SerialTransportConfig extends TransportConfig {
   dataBits?: number;
   stopBits?: number;
   parity?: "none" | "even" | "odd" | "mark" | "space";
+  // Reconnection settings
+  autoReconnect?: boolean;
+  reconnectDelay?: number;
+  maxReconnectAttempts?: number;
+  reconnectBackoffMultiplier?: number;
+  maxReconnectDelay?: number;
 }
 
 // Transport types
@@ -73,4 +79,8 @@ export interface TransportStatus {
   isConnected: boolean;
   lastActivity?: Date;
   config: TransportConfig;
+  // Optional reconnection status fields
+  reconnectAttempts?: number;
+  isReconnecting?: boolean;
+  nextReconnectDelay?: number;
 }

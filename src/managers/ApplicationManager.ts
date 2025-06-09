@@ -55,11 +55,6 @@ export class ApplicationManager {
       // Initialize transport-agnostic message publisher
       this.initializeMessagePublisher();
 
-      // Initialize status publishing if enabled
-      if (this.config.statusPublishing.enabled) {
-        await this.initializeStatusPublishing();
-      }
-
       logger.info(`${this.config.serverName} initialized successfully`);
     } catch (error) {
       logger.error("Failed to initialize application:", error);
@@ -81,6 +76,11 @@ export class ApplicationManager {
 
       // Subscribe to configured topics
       await this.subscribeToTopics();
+
+      // Initialize status publishing if enabled (after transports are connected)
+      if (this.config.statusPublishing.enabled) {
+        await this.initializeStatusPublishing();
+      }
 
       this.isRunning = true;
       logger.info(`${this.config.serverName} is running successfully`);

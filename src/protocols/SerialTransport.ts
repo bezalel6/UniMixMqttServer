@@ -19,6 +19,11 @@ export class SerialTransport implements ITransport {
   private lastActivity?: Date;
   private isConnectedState: boolean = false;
   private subscribedTopics: Set<string> = new Set();
+  private reconnectAttempts: number = 0;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private isReconnecting: boolean = false;
+  private shouldAutoReconnect: boolean = true;
+  private currentReconnectDelay: number = 0;
 
   constructor(config: SerialTransportConfig) {
     this.config = {
@@ -26,8 +31,14 @@ export class SerialTransport implements ITransport {
       dataBits: 8,
       stopBits: 1,
       parity: "none",
+      autoReconnect: true,
+      reconnectDelay: 2000,
+      maxReconnectAttempts: -1, // -1 means infinite attempts
+      reconnectBackoffMultiplier: 1.5,
+      maxReconnectDelay: 30000,
       ...config,
     };
+    this.currentReconnectDelay = this.config.reconnectDelay || 2000;
   }
 
   async publish(topic: string, payload: string | object): Promise<void> {
@@ -69,8 +80,20 @@ export class SerialTransport implements ITransport {
   }
 
   async connect(): Promise<void> {
+    // Clear any existing reconnection timer
+    this.clearReconnectTimer();
+    this.shouldAutoReconnect = true;
+
+    return this.attemptConnection();
+  }
+
+  private async attemptConnection(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
+        if (this.serialPort && this.serialPort.isOpen) {
+          this.serialPort.close();
+        }
+
         this.serialPort = new SerialPort({
           path: this.config.port,
           baudRate: this.config.baudRate!,
@@ -85,6 +108,9 @@ export class SerialTransport implements ITransport {
 
         this.serialPort.on("open", () => {
           this.isConnectedState = true;
+          this.isReconnecting = false;
+          this.reconnectAttempts = 0;
+          this.currentReconnectDelay = this.config.reconnectDelay || 2000;
           this.lastActivity = new Date();
 
           // Disable DTR and RTS signals
@@ -108,12 +134,24 @@ export class SerialTransport implements ITransport {
         this.serialPort.on("error", (error: Error) => {
           this.isConnectedState = false;
           logger.error(`[Serial Transport] Serial port error:`, error);
+
+          if (!this.isReconnecting) {
+            this.handleConnectionLoss();
+          }
+
           reject(error);
         });
 
         this.serialPort.on("close", () => {
+          const wasConnected = this.isConnectedState;
           this.isConnectedState = false;
-          logger.info(`[Serial Transport] Serial port closed`);
+
+          if (wasConnected) {
+            logger.warn(`[Serial Transport] Serial port closed unexpectedly`);
+            this.handleConnectionLoss();
+          } else {
+            logger.info(`[Serial Transport] Serial port closed`);
+          }
         });
 
         // Set up message parsing
@@ -122,12 +160,16 @@ export class SerialTransport implements ITransport {
         });
       } catch (error) {
         logger.error(`[Serial Transport] Failed to connect:`, error);
+        this.handleConnectionLoss();
         reject(error);
       }
     });
   }
 
   async disconnect(): Promise<void> {
+    this.shouldAutoReconnect = false;
+    this.clearReconnectTimer();
+
     return new Promise((resolve) => {
       if (this.serialPort && this.serialPort.isOpen) {
         this.serialPort.close((error) => {
@@ -149,6 +191,63 @@ export class SerialTransport implements ITransport {
     });
   }
 
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private handleConnectionLoss(): void {
+    if (!this.config.autoReconnect || !this.shouldAutoReconnect) {
+      logger.info(`[Serial Transport] Auto-reconnect is disabled`);
+      return;
+    }
+
+    if (this.isReconnecting) {
+      return; // Already handling reconnection
+    }
+
+    const maxAttempts = this.config.maxReconnectAttempts || -1;
+    if (maxAttempts > 0 && this.reconnectAttempts >= maxAttempts) {
+      logger.error(
+        `[Serial Transport] Max reconnection attempts (${maxAttempts}) reached. Giving up.`
+      );
+      return;
+    }
+
+    this.isReconnecting = true;
+    this.reconnectAttempts++;
+
+    logger.warn(
+      `[Serial Transport] Connection lost. Attempting reconnection ${
+        this.reconnectAttempts
+      }/${maxAttempts === -1 ? "∞" : maxAttempts} in ${
+        this.currentReconnectDelay
+      }ms...`
+    );
+
+    this.reconnectTimer = setTimeout(async () => {
+      try {
+        await this.attemptConnection();
+        logger.info(`[Serial Transport] Reconnection successful!`);
+      } catch (error) {
+        logger.error(`[Serial Transport] Reconnection failed:`, error);
+
+        // Calculate next delay with exponential backoff
+        const multiplier = this.config.reconnectBackoffMultiplier || 1.5;
+        const maxDelay = this.config.maxReconnectDelay || 30000;
+        this.currentReconnectDelay = Math.min(
+          this.currentReconnectDelay * multiplier,
+          maxDelay
+        );
+
+        this.isReconnecting = false;
+        this.handleConnectionLoss(); // Try again
+      }
+    }, this.currentReconnectDelay);
+  }
+
   onMessage(handler: MessageHandler): void {
     this.messageHandlers.add(handler);
     logger.debug(`[Serial Transport] Message handler registered`);
@@ -166,6 +265,9 @@ export class SerialTransport implements ITransport {
       isConnected: this.isConnected(),
       lastActivity: this.lastActivity,
       config: this.config,
+      reconnectAttempts: this.reconnectAttempts,
+      isReconnecting: this.isReconnecting,
+      nextReconnectDelay: this.currentReconnectDelay,
     };
   }
 
@@ -232,5 +334,43 @@ export class SerialTransport implements ITransport {
 
   getSubscribedTopics(): Set<string> {
     return new Set(this.subscribedTopics);
+  }
+
+  // Additional methods for reconnection control
+  enableAutoReconnect(): void {
+    this.shouldAutoReconnect = true;
+    logger.info(`[Serial Transport] Auto-reconnect enabled`);
+  }
+
+  disableAutoReconnect(): void {
+    this.shouldAutoReconnect = false;
+    this.clearReconnectTimer();
+    logger.info(`[Serial Transport] Auto-reconnect disabled`);
+  }
+
+  isAutoReconnectEnabled(): boolean {
+    return this.shouldAutoReconnect && (this.config.autoReconnect || false);
+  }
+
+  getReconnectAttempts(): number {
+    return this.reconnectAttempts;
+  }
+
+  resetReconnectAttempts(): void {
+    this.reconnectAttempts = 0;
+    this.currentReconnectDelay = this.config.reconnectDelay || 2000;
+    logger.debug(`[Serial Transport] Reconnection attempts reset`);
+  }
+
+  async forceReconnect(): Promise<void> {
+    logger.info(`[Serial Transport] Forcing reconnection...`);
+    this.clearReconnectTimer();
+    this.isReconnecting = false;
+
+    if (this.serialPort && this.serialPort.isOpen) {
+      await this.disconnect();
+    }
+
+    return this.connect();
   }
 }
