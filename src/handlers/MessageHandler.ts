@@ -38,7 +38,7 @@ export abstract class BaseMessageHandler<T extends UniMixMessage> {
     await context.mqttClient.publish(responseTopic, JSON.stringify(message));
   }
 }
-
+const RelevantProcesses = [/JellyfinMediaPlayer/i, /youtube/i, /chrome/i];
 async function getAudio() {
   // Execute the PowerShell command to get audio status
   const { stdout, stderr } = await execAsync(
@@ -64,7 +64,8 @@ function parseAudioProcessOutput(rawOutput: string): string {
   const audioStatuses = rawOutput
     .split("\n")
     .map(mapLineToAudioStatus)
-    .filter((status): status is AudioStatus => status !== null);
+    .filter((status): status is AudioStatus => status !== null)
+    .filter((status) => isRelevantProcess(status.name));
 
   const audioStatusObject: Record<string, number> = {};
   audioStatuses.forEach((status) => {
@@ -72,6 +73,15 @@ function parseAudioProcessOutput(rawOutput: string): string {
   });
 
   return JSON.stringify(audioStatusObject, null, 2);
+}
+
+/**
+ * Checks if a process name matches any of the relevant processes
+ * @param processName - The name of the process to check
+ * @returns true if the process matches any relevant process pattern
+ */
+function isRelevantProcess(processName: string): boolean {
+  return RelevantProcesses.some((pattern) => pattern.test(processName));
 }
 
 /**
@@ -93,6 +103,7 @@ function mapLineToAudioStatus(line: string): AudioStatus | null {
     return null;
   }
 
+  console.log(processName);
   return {
     name: processName,
     volume,
